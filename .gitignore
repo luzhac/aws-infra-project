@@ -1,0 +1,100 @@
+# =====================================
+# Global ignores
+# =====================================
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*.lock
+*.retry
+*.pid
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.code-workspace
+
+# Python (for CDK or helper scripts)
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+.env
+.venv/
+venv/
+ENV/
+env/
+*.pkl
+
+# Node.js (for CDK TypeScript or Helm scripts)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+build/
+coverage/
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+terraform.tfvars
+terraform.tfvars.json
+.terraformrc
+terraform.rc
+
+# Kubernetes
+*.kubeconfig
+*.crt
+*.key
+*.pem
+*.yaml.backup
+*.yaml.tmp
+*.secret.yaml
+
+# AWS CDK
+cdk.out/
+cdk.context.json
+
+# CloudFormation
+*.template.json
+*.template.yaml
+*.stack.yaml
+
+# Ansible
+*.retry
+*.vault_pass
+*.inventory
+*.cfg.backup
+
+# Helm
+charts/*.tgz
+chart.lock
+
+# Logs
+logs/
+*.log
+
+# Scripts
+*.bak
+*.out
+
+# Local test data
+tmp/
+output/
+local_test/
