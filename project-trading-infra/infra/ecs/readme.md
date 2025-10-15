@@ -1,1 +1,1 @@
-![Project Running Screenshot](img .png)
+![Project Running Screenshot](img.png)
