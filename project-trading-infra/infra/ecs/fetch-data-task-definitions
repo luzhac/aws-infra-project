@@ -1,0 +1,83 @@
+{
+    "compatibilities": [
+        "EXTERNAL",
+        "EC2"
+    ],
+    "containerDefinitions": [
+        {
+            "command": [
+                "ws.ws_binance_kline_future"
+            ],
+            "cpu": 0,
+            "environment": [],
+            "essential": true,
+            "image": ".dkr.ecr.ap-northeast-1.amazonaws.com/quant:latest",
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/binance-fetch",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "ap-northeast-1",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            },
+            "memoryReservation": 256,
+            "mountPoints": [
+                {
+                    "containerPath": "/mnt/efs",
+                    "readOnly": false,
+                    "sourceVolume": "efs-volume"
+                }
+            ],
+            "name": "binance-fetch",
+            "portMappings": [
+                {
+                    "containerPort": 8765,
+                    "hostPort": 8765,
+                    "protocol": "tcp"
+                },
+                {
+                    "containerPort": 5000,
+                    "hostPort": 5000,
+                    "protocol": "tcp"
+                }
+            ],
+            "systemControls": [],
+            "volumesFrom": []
+        }
+    ],
+    "family": "binance-fetch-task",
+    "networkMode": "bridge",
+    "placementConstraints": [],
+    "registeredAt": "2025-10-02T18:54:42.007Z",
+    "registeredBy": "arn:aws:sts:::assumed-role/s3_access/i-0ec7bdc1a8fcc337e",
+    "requiresAttributes": [
+        {
+            "name": "com.amazonaws.ecs.capability.logging-driver.awslogs"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.ecr-auth"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.19"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.21"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.29"
+        }
+    ],
+    "revision": 30,
+    "status": "ACTIVE",
+    "taskDefinitionArn": "arn:aws:ecs:ap-northeast-1::task-definition/binance-fetch-task:30",
+    "volumes": [
+        {
+            "host": {
+                "sourcePath": "/mnt/efs"
+            },
+            "name": "efs-volume"
+        }
+    ],
+    "tags": []
+}

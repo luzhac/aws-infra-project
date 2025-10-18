@@ -1,21 +1,14 @@
 {
-    "family": "redis-task",
-    "networkMode": "bridge",
-    "requiresCompatibilities": ["EC2"],
+    "compatibilities": [
+        "EXTERNAL",
+        "EC2"
+    ],
     "containerDefinitions": [
         {
-            "name": "redis",
-            "image": "redis:7-alpine",
             "cpu": 0,
-            "memoryReservation": 128,
+            "environment": [],
             "essential": true,
-            "portMappings": [
-                {
-                    "containerPort": 6379,
-                    "hostPort": 6379,
-                    "protocol": "tcp"
-                }
-            ],
+            "image": "redis:7-alpine",
             "logConfiguration": {
                 "logDriver": "awslogs",
                 "options": {
@@ -23,8 +16,43 @@
                     "awslogs-region": "ap-northeast-1",
                     "awslogs-stream-prefix": "ecs"
                 }
-            }
+            },
+            "memoryReservation": 128,
+            "mountPoints": [],
+            "name": "redis",
+            "portMappings": [
+                {
+                    "containerPort": 6379,
+                    "hostPort": 6379,
+                    "protocol": "tcp"
+                }
+            ],
+            "systemControls": [],
+            "volumesFrom": []
         }
     ],
-    "taskDefinitionArn": "arn:aws:ecs:ap-northeast-1:<ACCOUNT_ID>:task-definition/redis-task:3"
+    "family": "redis-task",
+    "networkMode": "bridge",
+    "placementConstraints": [],
+    "registeredAt": "2025-10-02T19:00:06.492Z",
+    "registeredBy": "arn:aws:sts:::assumed-role/s3_access/i-0ec7bdc1a8fcc337e",
+    "requiresAttributes": [
+        {
+            "name": "com.amazonaws.ecs.capability.logging-driver.awslogs"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.19"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.21"
+        }
+    ],
+    "requiresCompatibilities": [
+        "EC2"
+    ],
+    "revision": 3,
+    "status": "ACTIVE",
+    "taskDefinitionArn": "arn:aws:ecs:ap-northeast-1::task-definition/redis-task:3",
+    "volumes": [],
+    "tags": []
 }
