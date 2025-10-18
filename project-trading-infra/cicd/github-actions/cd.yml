@@ -1,9 +1,10 @@
-name: CD - Build & Push to ECR
+name: CD - Build & Push ARM64 Image to ECR
 
 on:
-  push:
-    branches: [ "main" ]
-
+  workflow_run:
+    workflows: ["CI - Test, Lint, and Scan"]   # CI 工作流名称
+    types:
+      - completed
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
