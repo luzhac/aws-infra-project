@@ -3,7 +3,7 @@ provider "aws" {
 }
 
 # -------------------------------------------------------------------
-# SSH key pair
+# SSH Key Pair
 # -------------------------------------------------------------------
 resource "tls_private_key" "key" {
   algorithm = "RSA"
@@ -37,20 +37,41 @@ resource "aws_internet_gateway" "igw" {
   tags   = { Name = "${var.cluster_name}-igw" }
 }
 
-resource "aws_subnet" "public" {
+# Two public subnets in different AZs
+resource "aws_subnet" "public_a" {
   vpc_id                  = aws_vpc.this.id
-  cidr_block              = var.public_subnet_cidr
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "${var.region}a"
   map_public_ip_on_launch = true
-  tags                    = { Name = "${var.cluster_name}-public" }
+  tags                    = { Name = "${var.cluster_name}-public-a" }
 }
 
-resource "aws_subnet" "private" {
+resource "aws_subnet" "public_c" {
   vpc_id                  = aws_vpc.this.id
-  cidr_block              = var.private_subnet_cidr
-  map_public_ip_on_launch = false
-  tags                    = { Name = "${var.cluster_name}-private" }
+  cidr_block              = "10.0.2.0/24"
+  availability_zone       = "${var.region}c"
+  map_public_ip_on_launch = true
+  tags                    = { Name = "${var.cluster_name}-public-c" }
 }
 
+# Two private subnets in different AZs
+resource "aws_subnet" "private_a" {
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = "10.0.11.0/24"
+  availability_zone       = "${var.region}a"
+  map_public_ip_on_launch = false
+  tags                    = { Name = "${var.cluster_name}-private-a" }
+}
+
+resource "aws_subnet" "private_c" {
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = "10.0.12.0/24"
+  availability_zone       = "${var.region}c"
+  map_public_ip_on_launch = false
+  tags                    = { Name = "${var.cluster_name}-private-c" }
+}
+
+# Public route table
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
   tags   = { Name = "${var.cluster_name}-public-rt" }
@@ -62,59 +83,59 @@ resource "aws_route" "public_default" {
   gateway_id             = aws_internet_gateway.igw.id
 }
 
-resource "aws_route_table_association" "public_assoc" {
-  subnet_id      = aws_subnet.public.id
+resource "aws_route_table_association" "public_assoc_a" {
+  subnet_id      = aws_subnet.public_a.id
   route_table_id = aws_route_table.public.id
 }
 
+resource "aws_route_table_association" "public_assoc_c" {
+  subnet_id      = aws_subnet.public_c.id
+  route_table_id = aws_route_table.public.id
+}
+
+# Private route table
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.this.id
   tags   = { Name = "${var.cluster_name}-private-rt" }
 }
 
-resource "aws_route_table_association" "private_assoc" {
-  subnet_id      = aws_subnet.private.id
+resource "aws_route_table_association" "private_assoc_a" {
+  subnet_id      = aws_subnet.private_a.id
   route_table_id = aws_route_table.private.id
+}
+
+resource "aws_route_table_association" "private_assoc_c" {
+  subnet_id      = aws_subnet.private_c.id
+  route_table_id = aws_route_table.private.id
+}
+
+# -------------------------------------------------------------------
+# NAT Gateway
+# -------------------------------------------------------------------
+resource "aws_eip" "nat_eip" {
+  domain = "vpc"
+  tags   = { Name = "${var.cluster_name}-nat-eip" }
+}
+
+resource "aws_nat_gateway" "nat" {
+  allocation_id = aws_eip.nat_eip.id
+  subnet_id     = aws_subnet.public_a.id
+  tags          = { Name = "${var.cluster_name}-nat" }
+  depends_on    = [aws_internet_gateway.igw]
+}
+
+resource "aws_route" "private_default_via_nat" {
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.nat.id
 }
 
 # -------------------------------------------------------------------
 # Security Groups
 # -------------------------------------------------------------------
-resource "aws_security_group" "nat_sg" {
-  name        = "${var.cluster_name}-nat-sg"
-  description = "NAT/Bastion"
-  vpc_id      = aws_vpc.this.id
-
-  # 允许你的公网 SSH
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.allowed_ssh_cidr]
-  }
-
-  # 允许来自私网的所有入站流量
-  ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = [var.private_subnet_cidr]
-  }
-
-  # 出网
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = { Name = "${var.cluster_name}-nat-sg" }
-}
-
 resource "aws_security_group" "cluster_sg" {
   name        = "${var.cluster_name}-cluster-sg"
-  description = "Kubernetes nodes intra-traffic"
+  description = "Kubernetes nodes internal traffic"
   vpc_id      = aws_vpc.this.id
 
   ingress {
@@ -149,15 +170,6 @@ resource "aws_security_group" "efs_sg" {
   tags = { Name = "${var.cluster_name}-efs-sg" }
 }
 
-resource "aws_security_group_rule" "allow_ssh_from_nat" {
-  type                     = "ingress"
-  from_port                = 22
-  to_port                  = 22
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.nat_sg.id
-  security_group_id        = aws_security_group.cluster_sg.id
-}
-
 resource "aws_security_group_rule" "efs_from_cluster" {
   type                     = "ingress"
   from_port                = 2049
@@ -177,67 +189,81 @@ resource "aws_efs_file_system" "efs" {
   tags             = { Name = "${var.cluster_name}-efs" }
 }
 
-resource "aws_efs_mount_target" "mt_private" {
+resource "aws_efs_mount_target" "mt_private_a" {
   file_system_id  = aws_efs_file_system.efs.id
-  subnet_id       = aws_subnet.private.id
+  subnet_id       = aws_subnet.private_a.id
+  security_groups = [aws_security_group.efs_sg.id]
+}
+
+resource "aws_efs_mount_target" "mt_private_c" {
+  file_system_id  = aws_efs_file_system.efs.id
+  subnet_id       = aws_subnet.private_c.id
   security_groups = [aws_security_group.efs_sg.id]
 }
 
 # -------------------------------------------------------------------
-# NAT / Bastion (with full working SNAT)
+# ALB
 # -------------------------------------------------------------------
-resource "aws_instance" "nat" {
-  ami                    = var.ami_id_al2023_arm
-  instance_type          = "t4g.nano"
-  subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.nat_sg.id]
-  key_name               = aws_key_pair.kp.key_name
-  source_dest_check      = false
+resource "aws_security_group" "alb_sg" {
+  name        = "${var.cluster_name}-alb-sg"
+  description = "Allow inbound HTTP traffic"
+  vpc_id      = aws_vpc.this.id
 
-  user_data = <<-EOF
-#!/bin/bash
-set -euxo pipefail
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-dnf -y update
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-# 永久启用 IPv4 转发
-cat >/etc/sysctl.d/99-nat.conf <<'SYSCTL'
-net.ipv4.ip_forward = 1
-SYSCTL
-sysctl --system
-
-# 安装并启用 iptables-services
-dnf install -y iptables-services
-systemctl enable --now iptables
-
-# SNAT 转发规则
-PRIV_CIDR="${aws_subnet.private.cidr_block}"
-PUB_IF="$(ip -4 route ls default | awk '{print $5}')"
-
-iptables -t nat -A POSTROUTING -s "$PRIV_CIDR" -o "$PUB_IF" -j MASQUERADE
-iptables -A FORWARD -s "$PRIV_CIDR" -j ACCEPT
-iptables -A FORWARD -d "$PRIV_CIDR" -m state --state ESTABLISHED,RELATED -j ACCEPT
-service iptables save
-EOF
-
-  tags = { Name = "${var.cluster_name}-nat" }
+  tags = { Name = "${var.cluster_name}-alb-sg" }
 }
 
-resource "aws_eip" "nat_eip" {
-  instance = aws_instance.nat.id
-  domain   = "vpc"
-  tags     = { Name = "${var.cluster_name}-nat-eip" }
+resource "aws_lb" "alb" {
+  name               = "${var.cluster_name}-alb"
+  load_balancer_type = "application"
+  subnets            = [aws_subnet.public_a.id, aws_subnet.public_c.id]
+  security_groups    = [aws_security_group.alb_sg.id]
+  idle_timeout       = 60
+  tags               = { Name = "${var.cluster_name}-alb" }
 }
 
-resource "aws_route" "private_default_via_nat" {
-  route_table_id         = aws_route_table.private.id
-  destination_cidr_block = "0.0.0.0/0"
-  instance_id            = aws_instance.nat.id
-  depends_on             = [aws_instance.nat]
+resource "aws_lb_target_group" "tg" {
+  name        = "${var.cluster_name}-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.this.id
+  target_type = "instance"
+
+  health_check {
+    path                = "/"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg.arn
+  }
 }
 
 # -------------------------------------------------------------------
-# Node initialization scripts (common, master, joiners)
+# Common Cloud-init Template
 # -------------------------------------------------------------------
 locals {
   efs_dns = "${aws_efs_file_system.efs.id}.efs.${var.region}.amazonaws.com"
@@ -276,6 +302,9 @@ SH
   }
 }
 
+# -------------------------------------------------------------------
+# Master Node (control plane)
+# -------------------------------------------------------------------
 data "template_cloudinit_config" "master" {
   gzip          = false
   base64_encode = false
@@ -296,31 +325,13 @@ cp /etc/kubernetes/admin.conf /root/.kube/config
 kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
 kubeadm token create --print-join-command > /mnt/efs/join.sh
 chmod +x /mnt/efs/join.sh
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm repo add nginx-stable https://helm.nginx.com/stable
-helm repo update
-helm install nginx-gateway-fabric oci://ghcr.io/nginxinc/charts/nginx-gateway-fabric --namespace gateway-system --create-namespace --kubeconfig /etc/kubernetes/admin.conf
-cat >/root/gateway.yaml <<EOF2
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: main-gateway
-  namespace: gateway-system
-spec:
-  gatewayClassName: nginx
-  listeners:
-  - name: http
-    protocol: HTTP
-    port: 80
-    allowedRoutes:
-      namespaces:
-        from: All
-EOF2
-kubectl apply -f /root/gateway.yaml --kubeconfig /etc/kubernetes/admin.conf
 SH
   }
 }
 
+# -------------------------------------------------------------------
+# Worker Node Template
+# -------------------------------------------------------------------
 data "template_cloudinit_config" "joiner" {
   gzip          = false
   base64_encode = false
@@ -349,44 +360,58 @@ SH
 }
 
 # -------------------------------------------------------------------
-# EC2 nodes
+# EC2 Instances
 # -------------------------------------------------------------------
 resource "aws_instance" "master" {
   ami                    = var.ami_id_al2023_arm
   instance_type          = "t4g.small"
-  subnet_id              = aws_subnet.private.id
+  subnet_id              = aws_subnet.private_a.id
   vpc_security_group_ids = [aws_security_group.cluster_sg.id]
   key_name               = aws_key_pair.kp.key_name
   user_data              = data.template_cloudinit_config.master.rendered
-  depends_on             = [aws_efs_mount_target.mt_private]
+  depends_on             = [aws_efs_mount_target.mt_private_a]
   tags                   = { Name = "${var.cluster_name}-master" }
 }
 
-resource "aws_instance" "worker" {
+resource "aws_instance" "app" {
   ami                    = var.ami_id_al2023_arm
   instance_type          = "t4g.small"
-  subnet_id              = aws_subnet.private.id
+  subnet_id              = aws_subnet.private_c.id
   vpc_security_group_ids = [aws_security_group.cluster_sg.id]
   key_name               = aws_key_pair.kp.key_name
   user_data              = data.template_cloudinit_config.joiner.rendered
   depends_on             = [aws_instance.master]
-  tags                   = { Name = "${var.cluster_name}-worker" }
+  tags                   = { Name = "${var.cluster_name}-app" }
 }
 
-resource "aws_instance" "app2" {
+resource "aws_instance" "monitor" {
   ami                    = var.ami_id_al2023_arm
   instance_type          = "t4g.small"
-  subnet_id              = aws_subnet.private.id
+  subnet_id              = aws_subnet.private_a.id
   vpc_security_group_ids = [aws_security_group.cluster_sg.id]
   key_name               = aws_key_pair.kp.key_name
   user_data              = data.template_cloudinit_config.joiner.rendered
   depends_on             = [aws_instance.master]
-  tags                   = { Name = "${var.cluster_name}-app2" }
+  tags                   = { Name = "${var.cluster_name}-monitor" }
 }
 
-resource "aws_eip" "app2_eip" {
-  count    = var.assign_app2_eip ? 1 : 0
-  domain   = "vpc"
-  instance = aws_instance.app2.id
-  tags     = { Name = "${var.cluster_name}-app2-eip" }
+# -------------------------------------------------------------------
+# Register nodes to ALB
+# -------------------------------------------------------------------
+resource "aws_lb_target_group_attachment" "master_attach" {
+  target_group_arn = aws_lb_target_group.tg.arn
+  target_id        = aws_instance.master.id
+  port             = 80
+}
+
+resource "aws_lb_target_group_attachment" "app_attach" {
+  target_group_arn = aws_lb_target_group.tg.arn
+  target_id        = aws_instance.app.id
+  port             = 80
+}
+
+resource "aws_lb_target_group_attachment" "monitor_attach" {
+  target_group_arn = aws_lb_target_group.tg.arn
+  target_id        = aws_instance.monitor.id
+  port             = 80
 }
