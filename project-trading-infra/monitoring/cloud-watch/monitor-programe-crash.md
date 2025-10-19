@@ -88,7 +88,7 @@ aws logs put-metric-filter \
 
 aws sns create-topic --name HeartbeatAlertTopic
 aws sns subscribe \
-  --topic-arn arn:aws:sns:eu-west-2:173381466759:HeartbeatAlertTopic \
+  --topic-arn arn:aws:sns:eu-west-2::HeartbeatAlertTopic \
   --protocol email \
   --notification-endpoint a@gmail.com
 
@@ -103,5 +103,5 @@ aws cloudwatch put-metric-alarm \
   --threshold 1 \
   --comparison-operator LessThanThreshold \
   --treat-missing-data breaching \
-  --alarm-actions arn:aws:sns:eu-west-2:173381466759:HeartbeatAlertTopic
+  --alarm-actions arn:aws:sns:eu-west-2::HeartbeatAlertTopic
 
