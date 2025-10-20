@@ -85,7 +85,7 @@ cdk.context.json
 # Helm
 charts/*.tgz
 chart.lock
-
+*.pem
 # Logs
 logs/
 *.log
