@@ -1,4 +1,6 @@
 This project builds a self-managed Kubernetes cluster on AWS EC2 with a control plane, worker nodes, EFS storage, and IAM profiles.  
+
+ROUTE53->ALB->TARGET_GROUP->K8S_INGRESS->K8S_SERVICE->K8S_POD
  
                          ┌──────────────────────────────┐
                          │        Internet Users        │
