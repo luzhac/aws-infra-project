@@ -1,5 +1,5 @@
 https://v1-33.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
-
+INSTALL GUIDE
 *** important: master mode must has public ip***
  
 
