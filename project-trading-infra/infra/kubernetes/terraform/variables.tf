@@ -1,92 +1,72 @@
 ############################################################
-# 基础配置
+# Basic Configuration
 ############################################################
 
 variable "region" {
-  description = "AWS 区域"
+  description = "AWS region to deploy the cluster in"
   type        = string
-  default     = "ap-northeast-1" # 你也可以改成 eu-west-2 (伦敦)
+  default     = "ap-northeast-1" # Change to eu-west-2 (London) if needed
 }
 
 variable "cluster_name" {
-  description = "集群名称前缀，用于标识资源"
+  description = "Prefix name used to identify all related resources"
   type        = string
-  default     = "k8s-demo"
+  default     = "k8s"
 }
 
 ############################################################
-# 网络配置
+# Network Configuration
 ############################################################
 
 variable "vpc_cidr" {
-  description = "VPC 网段"
+  description = "CIDR block for the VPC"
   type        = string
   default     = "10.0.0.0/16"
 }
 
 variable "public_subnet_cidr" {
-  description = "公网子网 CIDR"
+  description = "CIDR block for the public subnet"
   type        = string
   default     = "10.0.1.0/24"
 }
 
 variable "private_subnet_cidr" {
-  description = "私网子网 CIDR"
+  description = "CIDR block for the private subnet"
   type        = string
   default     = "10.0.2.0/24"
 }
 
-############################################################
-# 镜像配置 (Amazon Linux 2023 ARM)
-############################################################
-
-variable "ami_id_al2023_arm" {
-  description = "Amazon Linux 2023 ARM64 AMI ID"
-  type        = string
-  # 例如：ap-northeast-1 (东京) 的 AMI
-  default     = "ami-00af5e7d41b60553e"
-  # 你可以使用命令查找：
-  # aws ec2 describe-images --owners amazon \
-  #   --filters "Name=name,Values=al2023-ami-2023*" \
-  #   --query "Images[*].[ImageId,Name]" --output table
-}
-
-
 
 ############################################################
-# 其他设置
+# Other Settings
 ############################################################
 
 variable "assign_app2_eip" {
-  description = "是否为 app2 分配独立 EIP（暂未使用）"
+  description = "Whether to assign a separate Elastic IP to app2 (optional)"
   type        = bool
   default     = false
 }
 
 ############################################################
-# 输出选项
+# Output Variables
 ############################################################
 
 output "alb_dns_name" {
-  description = "ALB 访问地址"
+  description = "DNS name of the Application Load Balancer"
   value       = aws_lb.alb.dns_name
 }
 
 output "efs_id" {
-  description = "EFS 文件系统 ID"
+  description = "ID of the EFS file system"
   value       = aws_efs_file_system.efs.id
 }
 
 output "nat_gateway_ip" {
-  description = "NAT Gateway 公网 IP"
+  description = "Public IP address of the NAT gateway instance"
   value       = aws_eip.nat_eip.public_ip
 }
 
 output "vpc_id" {
-  description = "VPC ID"
+  description = "ID of the created VPC"
   value       = aws_vpc.this.id
 }
-
-
-
-
