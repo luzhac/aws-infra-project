@@ -164,6 +164,7 @@ resource "aws_security_group" "cluster_sg" {
     protocol  = "-1"
     self      = true
   }
+
   ingress {
     description = "Allow SSH from anywhere"
     from_port   = 22
@@ -171,6 +172,7 @@ resource "aws_security_group" "cluster_sg" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -228,11 +230,11 @@ resource "aws_efs_mount_target" "mt_private_c" {
 }
 
 ############################################################
-# ALB
+# ALB (for Kubernetes NodePort 31278)
 ############################################################
 resource "aws_security_group" "alb_sg" {
   name        = "${var.cluster_name}-alb-sg"
-  description = "Allow inbound HTTP"
+  description = "Allow inbound HTTP for Kubernetes Ingress"
   vpc_id      = aws_vpc.this.id
 
   ingress {
@@ -240,12 +242,15 @@ resource "aws_security_group" "alb_sg" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow HTTP from public Internet"
   }
+
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound"
   }
 
   tags = { Name = "${var.cluster_name}-alb-sg" }
@@ -261,18 +266,22 @@ resource "aws_lb" "alb" {
 
 resource "aws_lb_target_group" "tg" {
   name        = "${var.cluster_name}-tg"
-  port        = 80
+  port        = 31278
   protocol    = "HTTP"
   vpc_id      = aws_vpc.this.id
   target_type = "instance"
 
   health_check {
     path                = "/"
+    port                = "31278"
+    protocol            = "HTTP"
     interval            = 30
     timeout             = 5
     healthy_threshold   = 2
     unhealthy_threshold = 2
   }
+
+  tags = { Name = "${var.cluster_name}-tg" }
 }
 
 resource "aws_lb_listener" "http" {
@@ -284,6 +293,34 @@ resource "aws_lb_listener" "http" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.tg.arn
   }
+}
+
+resource "aws_lb_target_group_attachment" "master_attach" {
+  target_group_arn = aws_lb_target_group.tg.arn
+  target_id        = aws_instance.master.id
+  port             = 31278
+}
+
+resource "aws_lb_target_group_attachment" "app_attach" {
+  target_group_arn = aws_lb_target_group.tg.arn
+  target_id        = aws_instance.app.id
+  port             = 31278
+}
+
+resource "aws_lb_target_group_attachment" "monitor_attach" {
+  target_group_arn = aws_lb_target_group.tg.arn
+  target_id        = aws_instance.monitor.id
+  port             = 31278
+}
+
+resource "aws_security_group_rule" "alb_to_nodeport" {
+  type                     = "ingress"
+  from_port                = 31278
+  to_port                  = 31278
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.alb_sg.id
+  security_group_id        = aws_security_group.cluster_sg.id
+  description              = "Allow ALB to access Kubernetes NodePort 31278"
 }
 
 ############################################################
@@ -303,19 +340,19 @@ locals {
 }
 
 ############################################################
-# EC2 Instances (Manual Setup, Master Has Public IP)
+# EC2 Instances
 ############################################################
 resource "aws_instance" "master" {
-  ami                         = local.ami_id_arm
-  instance_type               = "t4g.small"
-  subnet_id                   = aws_subnet.public_a.id
-  associate_public_ip_address  = true
-  vpc_security_group_ids       = [aws_security_group.cluster_sg.id]
-  iam_instance_profile         = aws_iam_instance_profile.ssm_profile.name
-  key_name                     = aws_key_pair.kp.key_name
-  source_dest_check            = false
-  depends_on                   = [aws_internet_gateway.igw]
-  tags                         = { Name = "${var.cluster_name}-master" }
+  ami                        = local.ami_id_arm
+  instance_type              = "t4g.small"
+  subnet_id                  = aws_subnet.public_a.id
+  associate_public_ip_address = true
+  vpc_security_group_ids     = [aws_security_group.cluster_sg.id]
+  iam_instance_profile       = aws_iam_instance_profile.ssm_profile.name
+  key_name                   = aws_key_pair.kp.key_name
+  source_dest_check          = false
+  depends_on                 = [aws_internet_gateway.igw]
+  tags                       = { Name = "${var.cluster_name}-master" }
 }
 
 resource "aws_instance" "app" {
@@ -338,25 +375,4 @@ resource "aws_instance" "monitor" {
   key_name               = aws_key_pair.kp.key_name
   depends_on             = [aws_instance.master]
   tags                   = { Name = "${var.cluster_name}-monitor" }
-}
-
-############################################################
-# Register Nodes to ALB
-############################################################
-resource "aws_lb_target_group_attachment" "master_attach" {
-  target_group_arn = aws_lb_target_group.tg.arn
-  target_id        = aws_instance.master.id
-  port             = 80
-}
-
-resource "aws_lb_target_group_attachment" "app_attach" {
-  target_group_arn = aws_lb_target_group.tg.arn
-  target_id        = aws_instance.app.id
-  port             = 80
-}
-
-resource "aws_lb_target_group_attachment" "monitor_attach" {
-  target_group_arn = aws_lb_target_group.tg.arn
-  target_id        = aws_instance.monitor.id
-  port             = 80
 }
