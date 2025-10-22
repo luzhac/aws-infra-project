@@ -1,0 +1,159 @@
+
+kubectl run frontend-pod --image=nginx -n cka
+kubectl run backend-pod --image=nginx -n cka
+
+
+kubectl expose pod frontend-pod --port=80 --target-port=80  -n cka
+
+kubectl expose pod backend-pod --port=80 --target-port=80  -n cka
+
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend
+data:
+  index.html: |
+    <html><body>
+      <h1>Frontend</h1>
+      <p>Backend is at <a href="http://backend-svc">backend-svc</a></p>
+    </body></html>
+
+
+  
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frontend-pod
+spec:
+  containers:
+  - image: nginx
+    name: frontend-container
+    volumeMounts:
+    - mountPath: /usr/share/nginx/html
+      name: cache-volume
+  volumes:
+  - name: cache-volume
+    configMap:
+      name: frontend
+
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /frontend
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-pod
+            port:
+              number: 80
+      - path: /backend
+        pathType: Prefix
+        backend:
+          service:
+            name: backend-pod
+            port:
+              number: 80
+
+
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: test-network-policy
+  namespace: cka
+spec:
+  podSelector:
+    matchLabels:
+      name: backend-pod
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          project: cka
+    - podSelector:
+        matchLabels:
+          role: frontend-pod
+
+kubectl exec -it backend-pod -n cka -- curl http://frontend-pod.cka.svc.cluster.local
+
+
+
+
+sudo mkdir /mnt/data
+sudo sh -c "echo 'Hello from Kubernetes storage' > /mnt/data/index.html"
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: task-pv-volume
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 10Mi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/data"
+
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: task-pv-claim
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Mi
+
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: backend-pod
+  labels:
+    run: backend-pod
+spec:
+  volumes:
+    - name: task-pv-storage
+      persistentVolumeClaim:
+        claimName: task-pv-claim
+  containers:
+    - name: task-pv-container
+      image: nginx
+      ports:
+        - containerPort: 80
+          name: "http-server"
+      volumeMounts:
+        - mountPath: "/usr/share/nginx/html"
+          name: task-pv-storage
+
+
+
+kubectl exec -it backend-pod -n cka -- /bin/sh
+k -n lima-control exec -it controller-586d6657-gdmch -- sh
+
+# restart the Deployment:
+kubectl -n lima-control rollout restart deploy controller
+
+kubectl get endpoints   -n cka
+
+kubectl explain pod.spec.volumes
