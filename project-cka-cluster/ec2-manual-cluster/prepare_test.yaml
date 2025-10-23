@@ -157,3 +157,10 @@ kubectl -n lima-control rollout restart deploy controller
 kubectl get endpoints   -n cka
 
 kubectl explain pod.spec.volumes
+
+“The kubelet will generate a key and CSR and store them in /var/lib/kubelet/pki
+openssl x509 -in /var/lib/kubelet/pki/kubelet-server-current.pem -text -noout | egrep "Issuer:|Extended Key Usage"
+
+Usually we need to dig a bit deeper and check logs using journalctl -u kubelet or cat /var/log/syslog | grep kubelet
+
+We go ahead and correct the path in file /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf:

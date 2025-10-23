@@ -134,11 +134,6 @@ resource "aws_route_table" "private" {
   tags   = { Name = "${var.cluster_name}-private-rt" }
 }
 
-resource "aws_route" "private_default_via_nat" {
-  route_table_id         = aws_route_table.private.id
-  destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.nat.id
-}
 
 resource "aws_route_table_association" "private_assoc_a" {
   subnet_id      = aws_subnet.private_a.id
