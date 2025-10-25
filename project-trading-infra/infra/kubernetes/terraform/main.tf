@@ -1,3 +1,6 @@
+############################################################
+# Provider
+############################################################
 provider "aws" {
   region = var.region
 }
@@ -29,11 +32,11 @@ resource "aws_iam_role" "ssm_role" {
   name = "${var.cluster_name}-ssm-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
+    Statement = [ {
       Effect = "Allow"
       Principal = { Service = "ec2.amazonaws.com" }
       Action    = "sts:AssumeRole"
-    }]
+    } ]
   })
 }
 
@@ -48,7 +51,7 @@ resource "aws_iam_instance_profile" "ssm_profile" {
 }
 
 ############################################################
-# Networking (VPC, Subnets, Routing)
+# Networking (VPC + Route via IGW)
 ############################################################
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
@@ -62,7 +65,7 @@ resource "aws_internet_gateway" "igw" {
   tags   = { Name = "${var.cluster_name}-igw" }
 }
 
-# Public Subnets
+# Public and Private Subnets
 resource "aws_subnet" "public_a" {
   vpc_id                  = aws_vpc.this.id
   cidr_block              = "10.0.1.0/24"
@@ -71,15 +74,6 @@ resource "aws_subnet" "public_a" {
   tags                    = { Name = "${var.cluster_name}-public-a" }
 }
 
-resource "aws_subnet" "public_c" {
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = "10.0.2.0/24"
-  availability_zone       = "${var.region}c"
-  map_public_ip_on_launch = true
-  tags                    = { Name = "${var.cluster_name}-public-c" }
-}
-
-# Private Subnets
 resource "aws_subnet" "private_a" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = "10.0.11.0/24"
@@ -87,14 +81,7 @@ resource "aws_subnet" "private_a" {
   tags              = { Name = "${var.cluster_name}-private-a" }
 }
 
-resource "aws_subnet" "private_c" {
-  vpc_id            = aws_vpc.this.id
-  cidr_block        = "10.0.12.0/24"
-  availability_zone = "${var.region}c"
-  tags              = { Name = "${var.cluster_name}-private-c" }
-}
-
-# Route Tables
+# Shared route table (no NAT Gateway)
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
   tags   = { Name = "${var.cluster_name}-public-rt" }
@@ -111,47 +98,18 @@ resource "aws_route_table_association" "public_assoc_a" {
   route_table_id = aws_route_table.public.id
 }
 
-resource "aws_route_table_association" "public_assoc_c" {
-  subnet_id      = aws_subnet.public_c.id
+resource "aws_route_table_association" "private_assoc_a" {
+  subnet_id      = aws_subnet.private_a.id
   route_table_id = aws_route_table.public.id
 }
 
-# NAT Gateway for Private Subnets
-resource "aws_eip" "nat_eip" {
-  domain = "vpc"
-  tags   = { Name = "${var.cluster_name}-nat-eip" }
-}
-
-resource "aws_nat_gateway" "nat" {
-  allocation_id = aws_eip.nat_eip.id
-  subnet_id     = aws_subnet.public_a.id
-  tags          = { Name = "${var.cluster_name}-nat" }
-  depends_on    = [aws_internet_gateway.igw]
-}
-
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.this.id
-  tags   = { Name = "${var.cluster_name}-private-rt" }
-}
-
-
-resource "aws_route_table_association" "private_assoc_a" {
-  subnet_id      = aws_subnet.private_a.id
-  route_table_id = aws_route_table.private.id
-}
-
-resource "aws_route_table_association" "private_assoc_c" {
-  subnet_id      = aws_subnet.private_c.id
-  route_table_id = aws_route_table.private.id
-}
-
 ############################################################
-# Security Groups
+# Security Group
 ############################################################
 resource "aws_security_group" "cluster_sg" {
   name        = "${var.cluster_name}-cluster-sg"
-  description = "Allow internal Kubernetes traffic"
   vpc_id      = aws_vpc.this.id
+  description = "Allow internal and SSH traffic"
 
   ingress {
     from_port = 0
@@ -161,7 +119,6 @@ resource "aws_security_group" "cluster_sg" {
   }
 
   ingress {
-    description = "Allow SSH from anywhere"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -174,152 +131,10 @@ resource "aws_security_group" "cluster_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  tags = { Name = "${var.cluster_name}-cluster-sg" }
-}
-
-resource "aws_security_group" "efs_sg" {
-  name        = "${var.cluster_name}-efs-sg"
-  description = "EFS access"
-  vpc_id      = aws_vpc.this.id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = { Name = "${var.cluster_name}-efs-sg" }
-}
-
-resource "aws_security_group_rule" "efs_from_cluster" {
-  type                     = "ingress"
-  from_port                = 2049
-  to_port                  = 2049
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.cluster_sg.id
-  security_group_id        = aws_security_group.efs_sg.id
 }
 
 ############################################################
-# EFS
-############################################################
-resource "aws_efs_file_system" "efs" {
-  creation_token   = "${var.cluster_name}-efs"
-  performance_mode = "generalPurpose"
-  throughput_mode  = "bursting"
-  tags             = { Name = "${var.cluster_name}-efs" }
-}
-
-resource "aws_efs_mount_target" "mt_private_a" {
-  file_system_id  = aws_efs_file_system.efs.id
-  subnet_id       = aws_subnet.private_a.id
-  security_groups = [aws_security_group.efs_sg.id]
-}
-
-resource "aws_efs_mount_target" "mt_private_c" {
-  file_system_id  = aws_efs_file_system.efs.id
-  subnet_id       = aws_subnet.private_c.id
-  security_groups = [aws_security_group.efs_sg.id]
-}
-
-############################################################
-# ALB (for Kubernetes NodePort 31278)
-############################################################
-resource "aws_security_group" "alb_sg" {
-  name        = "${var.cluster_name}-alb-sg"
-  description = "Allow inbound HTTP for Kubernetes Ingress"
-  vpc_id      = aws_vpc.this.id
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow HTTP from public Internet"
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow all outbound"
-  }
-
-  tags = { Name = "${var.cluster_name}-alb-sg" }
-}
-
-resource "aws_lb" "alb" {
-  name               = "${var.cluster_name}-alb"
-  load_balancer_type = "application"
-  subnets            = [aws_subnet.public_a.id, aws_subnet.public_c.id]
-  security_groups    = [aws_security_group.alb_sg.id]
-  tags               = { Name = "${var.cluster_name}-alb" }
-}
-
-resource "aws_lb_target_group" "tg" {
-  name        = "${var.cluster_name}-tg"
-  port        = 31278
-  protocol    = "HTTP"
-  vpc_id      = aws_vpc.this.id
-  target_type = "instance"
-
-  health_check {
-    path                = "/"
-    port                = "31278"
-    protocol            = "HTTP"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
-  }
-
-  tags = { Name = "${var.cluster_name}-tg" }
-}
-
-resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.alb.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.tg.arn
-  }
-}
-
-resource "aws_lb_target_group_attachment" "master_attach" {
-  target_group_arn = aws_lb_target_group.tg.arn
-  target_id        = aws_instance.master.id
-  port             = 31278
-}
-
-resource "aws_lb_target_group_attachment" "app_attach" {
-  target_group_arn = aws_lb_target_group.tg.arn
-  target_id        = aws_instance.app.id
-  port             = 31278
-}
-
-resource "aws_lb_target_group_attachment" "monitor_attach" {
-  target_group_arn = aws_lb_target_group.tg.arn
-  target_id        = aws_instance.monitor.id
-  port             = 31278
-}
-
-resource "aws_security_group_rule" "alb_to_nodeport" {
-  type                     = "ingress"
-  from_port                = 31278
-  to_port                  = 31278
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.alb_sg.id
-  security_group_id        = aws_security_group.cluster_sg.id
-  description              = "Allow ALB to access Kubernetes NodePort 31278"
-}
-
-############################################################
-# AMI - Ubuntu 22.04 ARM64
+# EC2 Instances (Master NAT + Worker + Monitor)
 ############################################################
 data "aws_ami" "ubuntu_2204_arm64" {
   most_recent = true
@@ -334,33 +149,50 @@ locals {
   ami_id_arm = data.aws_ami.ubuntu_2204_arm64.id
 }
 
-############################################################
-# EC2 Instances
-############################################################
+# Master = NAT + Kubernetes master
 resource "aws_instance" "master" {
-  ami                        = local.ami_id_arm
-  instance_type              = "t4g.small"
-  subnet_id                  = aws_subnet.public_a.id
-  associate_public_ip_address = true
-  vpc_security_group_ids     = [aws_security_group.cluster_sg.id]
-  iam_instance_profile       = aws_iam_instance_profile.ssm_profile.name
-  key_name                   = aws_key_pair.kp.key_name
-  source_dest_check          = false
-  depends_on                 = [aws_internet_gateway.igw]
-  tags                       = { Name = "${var.cluster_name}-master" }
+  ami                         = local.ami_id_arm
+  instance_type               = "t4g.small"
+  subnet_id                   = aws_subnet.public_a.id
+  associate_public_ip_address  = true
+  vpc_security_group_ids      = [aws_security_group.cluster_sg.id]
+  iam_instance_profile        = aws_iam_instance_profile.ssm_profile.name
+  key_name                    = aws_key_pair.kp.key_name
+  source_dest_check           = false
+  user_data = <<-EOF
+              #!/bin/bash
+              sysctl -w net.ipv4.ip_forward=1
+              iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+              EOF
+  tags = { Name = "${var.cluster_name}-master" }
 }
 
+resource "aws_eip" "master_eip" {
+  instance = aws_instance.master.id
+  domain   = "vpc"
+  tags     = { Name = "${var.cluster_name}-master-eip" }
+}
+
+# Worker node with public IP
 resource "aws_instance" "app" {
-  ami                    = local.ami_id_arm
-  instance_type          = "t4g.small"
-  subnet_id              = aws_subnet.private_c.id
-  vpc_security_group_ids = [aws_security_group.cluster_sg.id]
-  iam_instance_profile   = aws_iam_instance_profile.ssm_profile.name
-  key_name               = aws_key_pair.kp.key_name
-  depends_on             = [aws_instance.master]
-  tags                   = { Name = "${var.cluster_name}-app" }
+  ami                         = local.ami_id_arm
+  instance_type               = "t4g.small"
+  subnet_id                   = aws_subnet.public_a.id
+  associate_public_ip_address  = true
+  vpc_security_group_ids      = [aws_security_group.cluster_sg.id]
+  iam_instance_profile        = aws_iam_instance_profile.ssm_profile.name
+  key_name                    = aws_key_pair.kp.key_name
+  depends_on                  = [aws_instance.master]
+  tags = { Name = "${var.cluster_name}-app" }
 }
 
+resource "aws_eip" "app_eip" {
+  instance = aws_instance.app.id
+  domain   = "vpc"
+  tags     = { Name = "${var.cluster_name}-app-eip" }
+}
+
+# Worker node without public IP (uses master NAT)
 resource "aws_instance" "monitor" {
   ami                    = local.ami_id_arm
   instance_type          = "t4g.small"
@@ -369,5 +201,5 @@ resource "aws_instance" "monitor" {
   iam_instance_profile   = aws_iam_instance_profile.ssm_profile.name
   key_name               = aws_key_pair.kp.key_name
   depends_on             = [aws_instance.master]
-  tags                   = { Name = "${var.cluster_name}-monitor" }
+  tags = { Name = "${var.cluster_name}-monitor" }
 }

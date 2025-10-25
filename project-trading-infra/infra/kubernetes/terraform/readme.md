@@ -69,7 +69,7 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 echo "==== [Step 8]   Flannel   ===="
 kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/v0.25.3/Documentation/kube-flannel.yml
 
-echo "✅ Kubernetes Master ！"
+echo "Kubernetes Master ！"
 kubectl get nodes -o wide
 ```
  二、Worker  
@@ -130,7 +130,7 @@ sudo sed -i '/ swap / s/^/#/' /etc/fstab
 echo "==== [Step 5]   ===="
 sudo kubeadm join <MASTER_PRIVATE_IP>:6443 --token <TOKEN> --discovery-token-ca-cert-hash sha256:<HASH>
 
-echo "✅ Worker ！"
+ 
 ```
 *install cni*
 sudo mkdir -p /opt/cni/bin

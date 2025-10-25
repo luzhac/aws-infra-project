@@ -1,0 +1,4 @@
+sudo mkdir -p /opt/cni/bin
+curl -L -o /tmp/cni-plugins.tgz https://github.com/containernetworking/plugins/releases/download/v1.4.0/cni-plugins-linux-arm64-v1.4.0.tgz
+sudo tar -xzvf /tmp/cni-plugins.tgz -C /opt/cni/bin
+sudo systemctl restart kubelet
