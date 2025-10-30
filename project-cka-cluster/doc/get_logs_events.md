@@ -1,5 +1,14 @@
 Pod & Event Debug Commands
 
+
+systemctl status kubelet -l
+
+journalctl -u kubelet -f
+
+journalctl -u kubelet -n 100
+
+
+
 1️⃣ Check pod list and status
 
 kubectl get pods -n <ns> -o wide

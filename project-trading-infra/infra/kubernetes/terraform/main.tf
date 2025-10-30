@@ -167,11 +167,7 @@ resource "aws_instance" "master" {
   tags = { Name = "${var.cluster_name}-master" }
 }
 
-resource "aws_eip" "master_eip" {
-  instance = aws_instance.master.id
-  domain   = "vpc"
-  tags     = { Name = "${var.cluster_name}-master-eip" }
-}
+
 
 # Worker node with public IP
 resource "aws_instance" "app" {
@@ -186,16 +182,13 @@ resource "aws_instance" "app" {
   tags = { Name = "${var.cluster_name}-app" }
 }
 
-resource "aws_eip" "app_eip" {
-  instance = aws_instance.app.id
-  domain   = "vpc"
-  tags     = { Name = "${var.cluster_name}-app-eip" }
-}
 
-# Worker node without public IP (uses master NAT)
+
+# Worker node
 resource "aws_instance" "monitor" {
   ami                    = local.ami_id_arm
   instance_type          = "t4g.small"
+  associate_public_ip_address  = true
   subnet_id              = aws_subnet.private_a.id
   vpc_security_group_ids = [aws_security_group.cluster_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ssm_profile.name

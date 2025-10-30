@@ -1,76 +1,127 @@
-terraform {
-  required_version = ">= 1.5"
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
+############################################################
+# Provider
+############################################################
 provider "aws" {
-  region = "us-east-1"
+  region = var.region
 }
 
+############################################################
+# SSH Key Pair
+############################################################
+resource "tls_private_key" "key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
 
+resource "aws_key_pair" "kp" {
+  key_name   = "${var.cluster_name}-key"
+  public_key = tls_private_key.key.public_key_openssh
+}
 
-resource "aws_vpc" "k8s_vpc" {
-  cidr_block           = "10.20.0.0/16"
+resource "local_file" "private_key_pem" {
+  content              = tls_private_key.key.private_key_pem
+  filename             = "${path.module}/${var.cluster_name}.pem"
+  file_permission      = "0400"
+  directory_permission = "0700"
+}
+
+############################################################
+# IAM Role for SSM
+############################################################
+resource "aws_iam_role" "ssm_role" {
+  name = "${var.cluster_name}-ssm-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [ {
+      Effect = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    } ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_attach" {
+  role       = aws_iam_role.ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ssm_profile" {
+  name = "${var.cluster_name}-ssm-profile"
+  role = aws_iam_role.ssm_role.name
+}
+
+############################################################
+# Networking (VPC + Route via IGW)
+############################################################
+resource "aws_vpc" "this" {
+  cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
-  tags = { Name = "cka-vpc" }
+  tags = { Name = "${var.cluster_name}-vpc" }
 }
 
 resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.k8s_vpc.id
+  vpc_id = aws_vpc.this.id
+  tags   = { Name = "${var.cluster_name}-igw" }
 }
 
-resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.k8s_vpc.id
-  cidr_block              = "10.20.1.0/24"
-  availability_zone       = "us-east-1a"
+# Public and Private Subnets
+resource "aws_subnet" "public_a" {
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "${var.region}a"
   map_public_ip_on_launch = true
-  tags = { Name = "cka-public" }
+  tags                    = { Name = "${var.cluster_name}-public-a" }
 }
 
-resource "aws_route_table" "rt" {
-  vpc_id = aws_vpc.k8s_vpc.id
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw.id
-  }
+resource "aws_subnet" "private_a" {
+  vpc_id            = aws_vpc.this.id
+  cidr_block        = "10.0.11.0/24"
+  availability_zone = "${var.region}a"
+  tags              = { Name = "${var.cluster_name}-private-a" }
 }
 
-resource "aws_route_table_association" "assoc" {
-  subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.rt.id
+# Shared route table (no NAT Gateway)
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.this.id
+  tags   = { Name = "${var.cluster_name}-public-rt" }
 }
 
-resource "aws_security_group" "k8s_sg" {
-  vpc_id = aws_vpc.k8s_vpc.id
-  name   = "cka-sg"
+resource "aws_route" "public_default" {
+  route_table_id         = aws_route_table.public.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.igw.id
+}
+
+resource "aws_route_table_association" "public_assoc_a" {
+  subnet_id      = aws_subnet.public_a.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "private_assoc_a" {
+  subnet_id      = aws_subnet.private_a.id
+  route_table_id = aws_route_table.public.id
+}
+
+############################################################
+# Security Group
+############################################################
+resource "aws_security_group" "cluster_sg" {
+  name        = "${var.cluster_name}-cluster-sg"
+  vpc_id      = aws_vpc.this.id
+  description = "Allow internal and SSH traffic"
 
   ingress {
-    description = "SSH"
+    from_port = 0
+    to_port   = 0
+    protocol  = "-1"
+    self      = true
+  }
+
+  ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Kubernetes ports"
-    from_port   = 6443
-    to_port     = 32767
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "ICMP Ping"
-    from_port   = -1
-    to_port     = -1
-    protocol    = "icmp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -82,98 +133,54 @@ resource "aws_security_group" "k8s_sg" {
   }
 }
 
-
-resource "tls_private_key" "key" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
-resource "aws_key_pair" "generated" {
-  key_name   = "cka-key"
-  public_key = tls_private_key.key.public_key_openssh
-}
-
-resource "local_file" "pem" {
-  filename = "${path.module}/cka-key.pem"
-  content  = tls_private_key.key.private_key_pem
-  file_permission = "0600"
-}
-
-
-data "aws_ami" "ubuntu" {
+############################################################
+# EC2 Instances (Master   + Worker )
+############################################################
+data "aws_ami" "ubuntu_2204_arm64" {
   most_recent = true
   owners      = ["099720109477"]
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*"]
   }
 }
 
-
-
 locals {
-  common_user_data = <<-EOT
-    #!/bin/bash
-    apt-get update -y
-    apt-get install -y apt-transport-https curl gnupg2 software-properties-common
-    swapoff -a
-    sed -i '/ swap / s/^/#/' /etc/fstab
-    modprobe overlay
-    modprobe br_netfilter
-    cat <<EOF | tee /etc/sysctl.d/k8s.conf
-    net.bridge.bridge-nf-call-iptables = 1
-    net.ipv4.ip_forward = 1
-    EOF
-    sysctl --system
-    apt-get install -y containerd
-    mkdir -p /etc/containerd
-    containerd config default | tee /etc/containerd/config.toml
-    systemctl restart containerd
-    systemctl enable containerd
-    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/kubernetes-apt-keyring.gpg
-    echo "deb [signed-by=/etc/apt/trusted.gpg.d/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
-    apt-get update -y
-    apt-get install -y kubelet kubeadm kubectl
-    apt-mark hold kubelet kubeadm kubectl
-  EOT
+  ami_id_arm = data.aws_ami.ubuntu_2204_arm64.id
 }
 
-resource "aws_instance" "control_plane" {
-  ami           = data.aws_ami.ubuntu.id
-  instance_type = "t3.medium"
-  subnet_id     = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.k8s_sg.id]
-  key_name      = aws_key_pair.generated.key_name
-  associate_public_ip_address = true
-
-  user_data = local.common_user_data
-
-  tags = { Name = "control-plane" }
-}
-
-resource "aws_instance" "workers" {
-  count         = 2
-  ami           = data.aws_ami.ubuntu.id
-  instance_type = "t3.small"
-  subnet_id     = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.k8s_sg.id]
-  key_name      = aws_key_pair.generated.key_name
-  associate_public_ip_address = true
-
-  user_data = local.common_user_data
-
-  tags = { Name = "worker-${count.index + 1}" }
+# Master =  Kubernetes master
+resource "aws_instance" "master" {
+  ami                         = local.ami_id_arm
+  instance_type               = "t4g.micro"
+  subnet_id                   = aws_subnet.public_a.id
+  associate_public_ip_address  = true
+  vpc_security_group_ids      = [aws_security_group.cluster_sg.id]
+  iam_instance_profile        = aws_iam_instance_profile.ssm_profile.name
+  key_name                    = aws_key_pair.kp.key_name
+  source_dest_check           = false
+  user_data = <<-EOF
+              #!/bin/bash
+              sysctl -w net.ipv4.ip_forward=1
+              iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+              EOF
+  tags = { Name = "${var.cluster_name}-master" }
 }
 
 
-output "control_plane_ip" {
-  value = aws_instance.control_plane.public_ip
+
+# Worker node with public IP
+resource "aws_instance" "app" {
+  ami                         = local.ami_id_arm
+  instance_type               = "t4g.micro"
+  subnet_id                   = aws_subnet.public_a.id
+  associate_public_ip_address  = true
+  vpc_security_group_ids      = [aws_security_group.cluster_sg.id]
+  iam_instance_profile        = aws_iam_instance_profile.ssm_profile.name
+  key_name                    = aws_key_pair.kp.key_name
+  depends_on                  = [aws_instance.master]
+  tags = { Name = "${var.cluster_name}-app" }
 }
 
-output "worker_ips" {
-  value = [for w in aws_instance.workers : w.public_ip]
-}
 
-output "ssh_key" {
-  value = local_file.pem.filename
-}
+
